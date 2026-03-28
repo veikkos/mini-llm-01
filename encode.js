@@ -1,6 +1,6 @@
 // Pre-encode text into a binary token file for fast training
-// Run: node encode.js --input ../data/tinystories.txt
-// Run: node encode.js --input ../data/tinystories.txt --output tokens.bin
+// Run: node encode.js --input data/tinystories.txt
+// Run: node encode.js --input data/tinystories.txt --output tokens.bin
 
 const fs = require("fs");
 const path = require("path");
@@ -12,7 +12,7 @@ const getArg = (name, def) => {
   return i >= 0 ? args[i + 1] : def;
 };
 
-const inputPath = path.resolve(getArg("input", path.join(__dirname, "../data/tinystories.txt")));
+const inputPath = path.resolve(getArg("input", path.join(__dirname, "data/tinystories.txt")));
 const vocabPath = path.resolve(getArg("vocab", path.join(__dirname, "vocab.json")));
 const outputPath = path.resolve(getArg("output", path.join(__dirname, "tokens.bin")));
 

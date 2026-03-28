@@ -7,7 +7,7 @@ const fs = require("fs");
 const path = require("path");
 const https = require("https");
 
-const OUT_DIR = path.join(__dirname, "..", "data");
+const OUT_DIR = path.join(__dirname, "data");
 const OUT_FILE = path.join(OUT_DIR, "tinystories.txt");
 const MAX_BYTES = 250_000_000; // download ~250MB then trim at story boundary
 
@@ -87,12 +87,11 @@ async function main() {
   text = text.replace(/\n{3,}/g, "\n\n");
   text = text.trim() + "\n";
 
+  fs.mkdirSync(OUT_DIR, { recursive: true });
   fs.writeFileSync(OUT_FILE, text);
   const stories = text.split("\n\n").length;
   console.log(`\n  Saved: ${(text.length / 1e6).toFixed(1)}MB, ~${stories.toLocaleString()} stories`);
-  console.log(`\nNow retrain vocab and model:`);
-  console.log(`  node train-vocab.js --input ../data/tinystories.txt`);
-  console.log(`  node train.js --input ../data/tinystories.txt`);
+  process.exit(0);
 }
 
 main().catch((e) => {

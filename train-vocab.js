@@ -1,6 +1,6 @@
 // Train a BPE vocabulary from a text corpus
 // Run: node train-vocab.js
-// Run: node train-vocab.js --input ../data/tinystories.txt --output vocab.json --size 4096
+// Run: node train-vocab.js --input data/tinystories.txt --output vocab.json --size 4096
 
 const fs = require("fs");
 const path = require("path");
@@ -12,7 +12,7 @@ const getArg = (name, def) => {
   return i >= 0 ? args[i + 1] : def;
 };
 
-const inputPath = path.resolve(getArg("input", path.join(__dirname, "../data/tinystories.txt")));
+const inputPath = path.resolve(getArg("input", path.join(__dirname, "data/tinystories.txt")));
 const outputPath = path.resolve(getArg("output", path.join(__dirname, "vocab.json")));
 const vocabSize = parseInt(getArg("size", "4096"));
 

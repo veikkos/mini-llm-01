@@ -1,10 +1,15 @@
 @echo off
 REM Build the CUDA addon for Node.js on Windows
-REM Run from Developer Command Prompt: build.cmd
+REM Run from Developer Command Prompt: build.cmd [sm_arch]
+REM Example: build.cmd sm_86
 
 setlocal
 
+set ARCH=%1
+if "%ARCH%"=="" set ARCH=sm_89
+
 echo === Building CUDA Mini LLM addon ===
+echo GPU architecture: %ARCH%
 
 where nvcc >nul 2>&1
 if errorlevel 1 (
@@ -19,13 +24,13 @@ echo.
 echo Compiling CUDA kernels...
 if not exist build\Release\obj.target mkdir build\Release\obj.target
 
-nvcc -c native/kernels.cu -o build/Release/obj.target/kernels.obj -O3 -arch=sm_89 -lcublas --no-compress 2>&1
+nvcc -c native/kernels.cu -o build/Release/obj.target/kernels.obj -O3 -arch=%ARCH% -lcublas --no-compress 2>&1
 if errorlevel 1 (
     echo CUDA kernels compilation failed.
     exit /b 1
 )
 
-nvcc -c native/model.cu -o build/Release/obj.target/model.obj -O3 -arch=sm_89 -lcublas --no-compress 2>&1
+nvcc -c native/model.cu -o build/Release/obj.target/model.obj -O3 -arch=%ARCH% -lcublas --no-compress 2>&1
 if errorlevel 1 (
     echo CUDA model compilation failed.
     exit /b 1

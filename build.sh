@@ -6,7 +6,10 @@
 
 set -e
 
+ARCH="${1:-sm_89}"
+
 echo "=== Building CUDA Mini LLM addon ==="
+echo "GPU architecture: $ARCH"
 
 # Check for nvcc
 if ! command -v nvcc &> /dev/null; then
@@ -26,14 +29,13 @@ nvcc -c native/kernels.cu \
     -o build/Release/obj.target/kernels.o \
     --compiler-options '-fPIC' \
     -O3 \
-    -arch=sm_89  # RTX 4080 = Ada Lovelace = sm_89
-    # Change to sm_86 for RTX 3080, sm_75 for RTX 2080, etc.
+    -arch=$ARCH
 
 nvcc -c native/model.cu \
     -o build/Release/obj.target/model.o \
     --compiler-options '-fPIC' \
     -O3 \
-    -arch=sm_89
+    -arch=$ARCH
 
 g++ -c -O2 -std=c++17 -fPIC native/bpe.cpp \
     -o build/Release/obj.target/bpe.o

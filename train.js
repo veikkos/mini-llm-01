@@ -39,7 +39,7 @@ const eosToken = cuda.bpeEosToken();
 // Load tokens — either from pre-encoded binary or by encoding text on the fly
 const tokensPath = getArg("tokens", null);
 console.log("=== Mini LLM — CUDA Training ===\n");
-console.log(`Backend: CUDA (RTX 4080)`);
+console.log(`Backend: CUDA`);
 console.log(`Tokenizer: BPE (vocab ${vocabSize})`);
 
 let tokens;
@@ -50,7 +50,7 @@ if (tokensPath) {
   tokens = Array.from(new Int32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4));
   console.log(` ${tokens.length.toLocaleString()} tokens`);
 } else {
-  const inputPath = path.resolve(getArg("input", path.join(__dirname, "../data/tinystories.txt")));
+  const inputPath = path.resolve(getArg("input", path.join(__dirname, "data/tinystories.txt")));
   process.stdout.write(`Loading ${path.basename(inputPath)}...`);
   const text = fs.readFileSync(inputPath, "utf-8");
   console.log(` ${(text.length / 1e6).toFixed(1)}MB`);
