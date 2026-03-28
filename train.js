@@ -120,15 +120,10 @@ const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
 console.log(`Training complete in ${totalTime}s\n`);
 
 // Save weights
-const weightsPath = path.join(__dirname, "weights.json");
-const weights = {
-  config: { vocabSize, embedDim, contextLen, numLayers, numHeads },
-  vocabFile: "vocab.json",
-  params: model.downloadWeights(),
-};
-fs.writeFileSync(weightsPath, JSON.stringify(weights));
+const weightsPath = path.join(__dirname, "weights.bin");
+model.saveWeightsBin(weightsPath);
 const sizeMB = (fs.statSync(weightsPath).size / 1024 / 1024).toFixed(1);
-console.log(`Weights saved to weights.json (${sizeMB}MB)`);
+console.log(`Weights saved to weights.bin (${sizeMB}MB)`);
 console.log("Run: node generate.js");
 
 cuda.bpeFree(bpe);

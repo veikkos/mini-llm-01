@@ -17,9 +17,9 @@ const defaultTemp = parseFloat(getArg("temp", "0.7"));
 const vocabPath = path.resolve(getArg("vocab", path.join(__dirname, "vocab.json")));
 
 // Load weights
-const weightsPath = path.join(__dirname, "weights.json");
+const weightsPath = path.join(__dirname, "weights.bin");
 if (!fs.existsSync(weightsPath)) {
-  console.log("No weights.json found. Train first:\n  node train.js\n");
+  console.log("No weights.bin found. Train first:\n  node train.js\n");
   process.exit(1);
 }
 
@@ -30,8 +30,9 @@ if (!fs.existsSync(vocabPath)) {
 }
 
 console.log("Loading trained model...");
-const weights = JSON.parse(fs.readFileSync(weightsPath, "utf-8"));
-const { vocabSize, embedDim, contextLen, numLayers, numHeads } = weights.config;
+const buf = fs.readFileSync(weightsPath);
+const header = new Int32Array(buf.buffer, buf.byteOffset, 5);
+const [vocabSize, embedDim, contextLen, numLayers, numHeads] = header;
 
 const bpe = cuda.bpeCreate();
 cuda.bpeLoad(bpe, vocabPath);
@@ -44,7 +45,7 @@ if (bpeVocab !== vocabSize) {
 }
 
 const model = new GpuMiniLLM(vocabSize, embedDim, contextLen, numLayers, numHeads);
-model.uploadWeights(weights.params);
+model.uploadWeightsBin(weightsPath);
 
 console.log(`Loaded: ${numLayers} layers, ${numHeads} heads, ${model.paramCount().toLocaleString()} params (CUDA)`);
 console.log(`Tokenizer: BPE (vocab ${vocabSize})\n`);

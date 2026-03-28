@@ -120,6 +120,35 @@ class GpuMiniLLM {
       cuda.modelSetParam(this._handle, i, this.params[i].data, this.params[i].grad, this.params[i].size);
     }
   }
+
+  saveWeightsBin(filePath) {
+    const fs = require("fs");
+    const config = new Int32Array([this.vocabSize, this.embedDim, this.contextLen, this.numLayers, this.numHeads]);
+    const totalFloats = this.params.reduce((s, p) => s + p.size, 0);
+    const buf = Buffer.alloc(config.byteLength + totalFloats * 4);
+    Buffer.from(config.buffer).copy(buf, 0);
+    let offset = config.byteLength;
+    for (const p of this.params) {
+      const data = p.download();
+      Buffer.from(data.buffer, data.byteOffset, data.byteLength).copy(buf, offset);
+      offset += data.byteLength;
+    }
+    fs.writeFileSync(filePath, buf);
+  }
+
+  uploadWeightsBin(filePath) {
+    const fs = require("fs");
+    const buf = fs.readFileSync(filePath);
+    let offset = 5 * 4; // skip config header
+    for (const p of this.params) {
+      const data = new Float32Array(buf.buffer, buf.byteOffset + offset, p.size);
+      p.upload(data);
+      offset += p.size * 4;
+    }
+    for (let i = 0; i < this.params.length; i++) {
+      cuda.modelSetParam(this._handle, i, this.params[i].data, this.params[i].grad, this.params[i].size);
+    }
+  }
 }
 
 module.exports = { GpuMiniLLM };
