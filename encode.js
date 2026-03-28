@@ -33,29 +33,34 @@ cuda.bpeFree(bpe);
 console.log(`Vocab: ${vocabSize} tokens`);
 
 const maxChars = parseInt(getArg("maxchars", "0"));
+const CHUNK_SIZE = 1_000_000; // 1MB per chunk
+
+// Read file in chunks to avoid Node.js string length limit
 process.stdout.write(`Loading ${path.basename(inputPath)}...`);
-let text = fs.readFileSync(inputPath, "utf-8");
-console.log(` ${(text.length / 1e6).toFixed(1)}MB`);
-if (maxChars > 0 && text.length > maxChars) {
-  text = text.slice(0, maxChars);
+const fileSize = fs.statSync(inputPath).size;
+const readSize = maxChars > 0 ? Math.min(maxChars, fileSize) : fileSize;
+const chunks = [];
+const fd = fs.openSync(inputPath, "r");
+let bytesRead = 0;
+while (bytesRead < readSize) {
+  const toRead = Math.min(CHUNK_SIZE, readSize - bytesRead);
+  const buf = Buffer.alloc(toRead);
+  fs.readSync(fd, buf, 0, toRead, bytesRead);
+  chunks.push(buf.toString("utf-8"));
+  bytesRead += toRead;
+}
+fs.closeSync(fd);
+console.log(` ${(bytesRead / 1e6).toFixed(1)}MB`);
+if (maxChars > 0 && maxChars < fileSize) {
   console.log(`Truncated to ${(maxChars / 1e6).toFixed(0)}MB`);
 }
 
-// Split into chunks
-const CHUNK_SIZE = 1_000_000; // 1MB per chunk
-const numChunks = Math.ceil(text.length / CHUNK_SIZE);
-const chunks = [];
-for (let i = 0; i < numChunks; i++) {
-  chunks.push(text.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE));
-}
-text = null; // free memory
-
-const actualWorkers = Math.min(numWorkers, numChunks);
+const actualWorkers = Math.min(numWorkers, chunks.length);
 console.log(`Encoding ${chunks.length} chunks with ${actualWorkers} workers...`);
 const start = Date.now();
 
 // Results array indexed by chunk order
-const results = new Array(numChunks);
+const results = new Array(chunks.length);
 let chunksCompleted = 0;
 let nextChunk = 0;
 
@@ -73,9 +78,9 @@ function spawnWorker() {
         chunksCompleted++;
 
         const elapsedS = (Date.now() - start) / 1000;
-        const etaS = (elapsedS / chunksCompleted) * (numChunks - chunksCompleted);
+        const etaS = (elapsedS / chunksCompleted) * (chunks.length - chunksCompleted);
         process.stdout.write(
-          `\r  Chunk ${chunksCompleted}/${numChunks} | ${elapsedS.toFixed(0)}s elapsed | ~${etaS.toFixed(0)}s remaining`
+          `\r  Chunk ${chunksCompleted}/${chunks.length} | ${elapsedS.toFixed(0)}s elapsed | ~${etaS.toFixed(0)}s remaining`
         );
 
         sendNext(worker);
@@ -83,7 +88,7 @@ function spawnWorker() {
     });
 
     function sendNext(w) {
-      if (nextChunk < numChunks) {
+      if (nextChunk < chunks.length) {
         const idx = nextChunk++;
         w.postMessage({ type: "encode", index: idx, text: chunks[idx] });
       } else {
