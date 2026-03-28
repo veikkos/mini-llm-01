@@ -1,5 +1,7 @@
 # Mini LLM 01
 
+*Unsuprisingly created with an AI agent as an educational study. Not production grade or anything but does something.*
+
 A small transformer language model running entirely on the GPU via custom CUDA kernels.
 Includes BPE tokenizer, AdamW optimizer, and TinyStories training pipeline.
 
