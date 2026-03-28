@@ -1,9 +1,19 @@
-# Mini LLM 01
+# Mini-LLM-01
 
 *Unsuprisingly created with an AI agent as an educational study. Not production grade or anything but does something.*
 
 A small transformer language model running entirely on the GPU via custom CUDA kernels.
 Includes BPE tokenizer, AdamW optimizer, and TinyStories training pipeline.
+
+## Example output (15,000 steps, 250MB TinyStories subset)
+
+> Once upon a time there was a little girl called Jane. Jane loved to explore the world. She was always busy exploring the woods near her house.
+>
+> One day, Jane's mum said it was time to go to the park to play. She took out a lot of fun things, it was a track, and soon she was almost got there to catch it. She was so excited and said "Let's go outside and play on it!" She held the track in her hand.
+>
+> Jane was so excited. She ran outside to watch and saw all the different things she could go there. She wanted to bring something so wrong and her mom gave her a big hug. Jane was so proud of herself for being a great join her new track. She smiled and said "thank you so much!" Jane smiled and said happily.
+>
+> From then on, she knew she always could do lots of fun things with her favourite things!
 
 ## Requirements
 
