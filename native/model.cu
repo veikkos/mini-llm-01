@@ -635,6 +635,71 @@ void model_update(CudaModel* m, float lr) {
     cudaDeviceSynchronize();
 }
 
+// Single training step: batch prep + zero grad + forward + backward + update.
+// all_tokens: full token array on CPU, tokenCount: length of all_tokens
+// offsets: array of B random start positions (CPU), lr: learning rate
+// Returns loss value.
+float model_train_step(CudaModel* m, const int* all_tokens, int tokenCount,
+                        const int* offsets, int B, int T, float lr) {
+    // Build batch on CPU
+    int BT = B * T;
+    int* batchInput = (int*)malloc(BT * sizeof(int));
+    int* batchTarget = (int*)malloc(BT * sizeof(int));
+    for (int b = 0; b < B; b++) {
+        int start = offsets[b];
+        for (int t = 0; t < T; t++) {
+            batchInput[b * T + t] = all_tokens[start + t];
+            batchTarget[b * T + t] = all_tokens[start + 1 + t];
+        }
+    }
+
+    // Zero gradients
+    for (int i = 0; i < m->numParams; i++) {
+        if (m->params[i].grad)
+            cuda_zero(m->params[i].grad, m->params[i].size);
+    }
+
+    // Forward
+    model_alloc_buffers(m, B, T);
+    int E = m->embedDim;
+    int V = m->vocabSize;
+    ModelBuffers* buf = &m->bufs;
+
+    cuda_copy_to_gpu_int(buf->tokens, batchInput, BT);
+    cuda_copy_to_gpu_int(buf->targets, batchTarget, BT);
+    cuda_copy_to_gpu_int(buf->positions, m->posCache, BT);
+
+    cuda_gather(m->params[m->iTokenEmbed].data, buf->tokens, buf->tokEmb, BT, E);
+    cuda_gather(m->params[m->iPosEmbed].data, buf->positions, buf->posEmb, BT, E);
+    cuda_add(buf->tokEmb, buf->posEmb, buf->x, BT * E, E, BT * E);
+
+    float* current = buf->x;
+    for (int i = 0; i < m->numLayers; i++) {
+        cuda_copy(current, buf->layerInputs[i], BT * E);
+        layer_forward(m, i, current, B, T);
+        current = m->layerBufs[i].afterFF;
+    }
+
+    cuda_matmul(current, m->params[m->iOutW].data, buf->logits, BT, E, V);
+    cuda_add(buf->logits, m->params[m->iOutB].data, buf->logits, BT * V, V, V);
+    cuda_log_softmax(buf->logits, buf->logProbs, BT, V);
+    cuda_nll_loss(buf->logProbs, buf->targets, buf->loss, BT, V);
+    cudaDeviceSynchronize();
+
+    float loss;
+    cuda_copy_to_cpu(&loss, buf->loss, 1);
+
+    // Backward
+    model_backward(m, B, T);
+
+    // Update
+    model_update(m, lr);
+
+    free(batchInput);
+    free(batchTarget);
+    return loss;
+}
+
 // Generate tokens. Returns number of tokens written to out_tokens (includes seed).
 // out_tokens must be large enough for seedLen + numTokens.
 // callback: if non-null, called with each new token index. Return 0 to stop early.

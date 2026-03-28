@@ -59,10 +59,11 @@ extern "C" {
     void model_set_param(CudaModel* m, int index, float* data, float* grad, int size);
     float model_forward(CudaModel* m, const int* tokens, const int* targets, int B, int T);
     void model_forward_logprobs(CudaModel* m, const int* tokens, int B, int T);
-    void model_get_logprobs(CudaModel* m, float* out, int size);
     void model_backward(CudaModel* m, int B, int T);
     void model_zero_grad(CudaModel* m);
     void model_update(CudaModel* m, float lr);
+    float model_train_step(CudaModel* m, const int* all_tokens, int tokenCount,
+                            const int* offsets, int B, int T, float lr);
     int model_generate(CudaModel* m, const int* seedTokens, int seedLen,
                         int numTokens, float temperature, int* out_tokens,
                         int (*callback)(int token, void* user), void* user);
@@ -457,17 +458,6 @@ static napi_value Sync(napi_env env, napi_callback_info info) {
     return make_undef(env);
 }
 
-// readFloat(gpu_ptr) — read a single float from GPU
-static napi_value ReadFloat(napi_env env, napi_callback_info info) {
-    size_t argc = 1; napi_value args[1];
-    napi_get_cb_info(env, info, &argc, args, NULL, NULL);
-    float val;
-    cuda_copy_to_cpu(&val, get_ptr(env, args[0]), 1);
-    napi_value result;
-    napi_create_double(env, val, &result);
-    return result;
-}
-
 // --- Model API wrappers ---
 
 // modelCreate(vocabSize, embedDim, contextLen, numLayers, numHeads) → handle
@@ -507,30 +497,6 @@ static napi_value ModelForward(napi_env env, napi_callback_info info) {
     return result;
 }
 
-// modelForwardLogprobs(handle, int32tokens, B, T)
-static napi_value ModelForwardLogprobs(napi_env env, napi_callback_info info) {
-    size_t argc = 4; napi_value args[4];
-    napi_get_cb_info(env, info, &argc, args, NULL, NULL);
-    CudaModel* m = (CudaModel*)(uintptr_t)get_int64(env, args[0]);
-    int* tokens; size_t tlen;
-    napi_get_typedarray_info(env, args[1], NULL, &tlen, (void**)&tokens, NULL, NULL);
-    int B = get_int(env, args[2]);
-    int T = get_int(env, args[3]);
-    model_forward_logprobs(m, tokens, B, T);
-    return make_undef(env);
-}
-
-// modelGetLogprobs(handle, float32out, size)
-static napi_value ModelGetLogprobs(napi_env env, napi_callback_info info) {
-    size_t argc = 3; napi_value args[3];
-    napi_get_cb_info(env, info, &argc, args, NULL, NULL);
-    CudaModel* m = (CudaModel*)(uintptr_t)get_int64(env, args[0]);
-    float* out; size_t len;
-    napi_get_typedarray_info(env, args[1], NULL, &len, (void**)&out, NULL, NULL);
-    model_get_logprobs(m, out, get_int(env, args[2]));
-    return make_undef(env);
-}
-
 // modelBackward(handle, B, T)
 static napi_value ModelBackward(napi_env env, napi_callback_info info) {
     size_t argc = 3; napi_value args[3];
@@ -556,6 +522,26 @@ static napi_value ModelUpdate(napi_env env, napi_callback_info info) {
     CudaModel* m = (CudaModel*)(uintptr_t)get_int64(env, args[0]);
     model_update(m, get_float(env, args[1]));
     return make_undef(env);
+}
+
+// modelTrainStep(handle, int32allTokens, int32offsets, B, T, lr) → float loss
+static napi_value ModelTrainStep(napi_env env, napi_callback_info info) {
+    size_t argc = 6; napi_value args[6];
+    napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+    CudaModel* m = (CudaModel*)(uintptr_t)get_int64(env, args[0]);
+    int* allTokens; size_t tokenCount;
+    napi_get_typedarray_info(env, args[1], NULL, &tokenCount, (void**)&allTokens, NULL, NULL);
+    int* offsets; size_t offsetCount;
+    napi_get_typedarray_info(env, args[2], NULL, &offsetCount, (void**)&offsets, NULL, NULL);
+    int B = get_int(env, args[3]);
+    int T = get_int(env, args[4]);
+    float lr = get_float(env, args[5]);
+
+    float loss = model_train_step(m, allTokens, (int)tokenCount, offsets, B, T, lr);
+
+    napi_value result;
+    napi_create_double(env, loss, &result);
+    return result;
 }
 
 // modelGenerate(handle, int32seed, numTokens, temperature) → Int32Array
@@ -800,7 +786,6 @@ static napi_value Init(napi_env env, napi_value exports) {
     EXPORT_FN(concatHeads, ConcatHeads)
     EXPORT_FN(splitHeads, SplitHeads)
     EXPORT_FN(sync, Sync)
-    EXPORT_FN(readFloat, ReadFloat)
     EXPORT_FN(batchedAttnScores, BatchedAttnScores)
     EXPORT_FN(batchedSoftmaxBackward, BatchedSoftmaxBackward)
     EXPORT_FN(batchedMatmul, BatchedMatmul)
@@ -809,11 +794,10 @@ static napi_value Init(napi_env env, napi_value exports) {
     EXPORT_FN(modelCreate, ModelCreate)
     EXPORT_FN(modelSetParam, ModelSetParam)
     EXPORT_FN(modelForward, ModelForward)
-    EXPORT_FN(modelForwardLogprobs, ModelForwardLogprobs)
-    EXPORT_FN(modelGetLogprobs, ModelGetLogprobs)
     EXPORT_FN(modelBackward, ModelBackward)
     EXPORT_FN(modelZeroGrad, ModelZeroGrad)
     EXPORT_FN(modelUpdate, ModelUpdate)
+    EXPORT_FN(modelTrainStep, ModelTrainStep)
     EXPORT_FN(modelGenerate, ModelGenerate)
     EXPORT_FN(modelGenerateStream, ModelGenerateStream)
     EXPORT_FN(modelFree, ModelFree)

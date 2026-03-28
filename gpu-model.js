@@ -92,6 +92,11 @@ class GpuMiniLLM {
     cuda.modelUpdate(this._handle, lr);
   }
 
+  // Single training step: batch prep + forward + backward + update in one C++ call
+  trainStep(allTokens, offsets, B, T, lr) {
+    return cuda.modelTrainStep(this._handle, allTokens, offsets, B, T, lr);
+  }
+
   // Generate tokens — entire loop runs in C++
   generate(startTokens, numTokens, temperature = 0.8) {
     const seed = new Int32Array(startTokens);
@@ -102,23 +107,6 @@ class GpuMiniLLM {
   generateStream(startTokens, numTokens, temperature, callback) {
     const seed = new Int32Array(startTokens);
     return Array.from(cuda.modelGenerateStream(this._handle, seed, numTokens, temperature, callback));
-  }
-
-  downloadWeights() {
-    return this.params.map(p => ({
-      shape: [p.rows, p.cols],
-      data: Array.from(p.download()),
-    }));
-  }
-
-  uploadWeights(paramData) {
-    for (let i = 0; i < this.params.length; i++) {
-      this.params[i].upload(new Float32Array(paramData[i].data));
-    }
-    // Re-register pointers with C++ model (same pointers, but just in case)
-    for (let i = 0; i < this.params.length; i++) {
-      cuda.modelSetParam(this._handle, i, this.params[i].data, this.params[i].grad, this.params[i].size);
-    }
   }
 
   saveWeightsBin(filePath) {

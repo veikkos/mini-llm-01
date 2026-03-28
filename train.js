@@ -1,7 +1,6 @@
 // Train the CUDA-accelerated Mini LLM with BPE tokenizer
-// Run: node train.js
-// Run: node train.js --steps 50000 --embed 256 --layers 6 --heads 8
-// Run: node train.js --tokens tokens.bin   (pre-encoded, skips BPE encoding)
+// Run: node train.js --tokens tokens.bin
+// Run: node train.js --tokens tokens.bin --steps 50000 --embed 256 --layers 6 --heads 8
 
 const fs = require("fs");
 const path = require("path");
@@ -36,30 +35,21 @@ cuda.bpeLoad(bpe, vocabPath);
 const vocabSize = cuda.bpeVocabSize(bpe);
 const eosToken = cuda.bpeEosToken();
 
-// Load tokens — either from pre-encoded binary or by encoding text on the fly
+// Load pre-encoded tokens
 const tokensPath = getArg("tokens", null);
+if (!tokensPath) {
+  console.error("Missing --tokens argument. Encode first:\n  node encode.js --input data/tinystories.txt\n");
+  process.exit(1);
+}
 console.log("=== Mini LLM — CUDA Training ===\n");
 console.log(`Backend: CUDA`);
 console.log(`Tokenizer: BPE (vocab ${vocabSize})`);
 
-let tokens;
-if (tokensPath) {
-  const p = path.resolve(tokensPath);
-  process.stdout.write(`Loading pre-encoded tokens from ${path.basename(p)}...`);
-  const buf = fs.readFileSync(p);
-  tokens = new Int32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
-  console.log(` ${tokens.length.toLocaleString()} tokens`);
-} else {
-  const inputPath = path.resolve(getArg("input", path.join(__dirname, "data/tinystories.txt")));
-  process.stdout.write(`Loading ${path.basename(inputPath)}...`);
-  const text = fs.readFileSync(inputPath, "utf-8");
-  console.log(` ${(text.length / 1e6).toFixed(1)}MB`);
-
-  process.stdout.write("Encoding text with BPE...");
-  const encStart = Date.now();
-  tokens = Array.from(cuda.bpeEncode(bpe, text));
-  console.log(` ${tokens.length.toLocaleString()} tokens (${((Date.now() - encStart) / 1000).toFixed(1)}s)`);
-}
+const p = path.resolve(tokensPath);
+process.stdout.write(`Loading pre-encoded tokens from ${path.basename(p)}...`);
+const buf = fs.readFileSync(p);
+const tokens = new Int32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
+console.log(` ${tokens.length.toLocaleString()} tokens`);
 
 // Create model
 const model = new GpuMiniLLM(vocabSize, embedDim, contextLen, numLayers, numHeads);
@@ -81,22 +71,14 @@ function getLR(step) {
   return minLR + 0.5 * (maxLR - minLR) * (1 + Math.cos(Math.PI * decay));
 }
 
+const offsets = new Int32Array(batchSize);
 for (let step = 0; step < numSteps; step++) {
-  const batchInput = new Int32Array(batchSize * contextLen);
-  const batchTarget = new Int32Array(batchSize * contextLen);
   for (let b = 0; b < batchSize; b++) {
-    const start = Math.floor(Math.random() * (tokens.length - contextLen - 1));
-    for (let t = 0; t < contextLen; t++) {
-      batchInput[b * contextLen + t] = tokens[start + t];
-      batchTarget[b * contextLen + t] = tokens[start + 1 + t];
-    }
+    offsets[b] = Math.floor(Math.random() * (tokens.length - contextLen - 1));
   }
 
   const lr = getLR(step);
-  model.zeroGrad();
-  const loss = model.forward(batchInput, batchTarget, batchSize);
-  model.backward(batchSize, contextLen);
-  model.update(lr);
+  const loss = model.trainStep(tokens, offsets, batchSize, contextLen, lr);
 
   if (step % 500 === 0 || step === numSteps - 1) {
     const elapsedS = (Date.now() - startTime) / 1000;
