@@ -120,5 +120,4 @@ Promise.all(Array.from({ length: actualWorkers }, () => spawnWorker())).then(() 
   fs.writeFileSync(outputPath, buf);
   const sizeMB = (buf.length / 1e6).toFixed(1);
   console.log(`\nSaved: ${outputPath} (${sizeMB}MB)`);
-  console.log(`\nTrain with:\n  node train.js --tokens ${path.basename(outputPath)}`);
 });

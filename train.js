@@ -60,7 +60,6 @@ if (tokensPath) {
   tokens = Array.from(cuda.bpeEncode(bpe, text));
   console.log(` ${tokens.length.toLocaleString()} tokens (${((Date.now() - encStart) / 1000).toFixed(1)}s)`);
 }
-console.log(`Training on ${tokens.length.toLocaleString()} tokens`);
 
 // Create model
 const model = new GpuMiniLLM(vocabSize, embedDim, contextLen, numLayers, numHeads);
