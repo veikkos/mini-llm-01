@@ -1,6 +1,7 @@
-// Interactive text generator using CUDA-accelerated model with BPE
-// Run: node generate.js
-// Run: node generate.js --temp 0.7
+// Text generator using CUDA-accelerated model with BPE
+// Run: node generate.js                                    (interactive)
+// Run: node generate.js --seed "Once upon" --oneshot       (single output)
+// Run: node generate.js --temp 0.7 --len 300
 
 const fs = require("fs");
 const path = require("path");
@@ -14,6 +15,9 @@ const getArg = (name, def) => {
   return i >= 0 ? args[i + 1] : def;
 };
 const defaultTemp = parseFloat(getArg("temp", "0.7"));
+const seedText = getArg("seed", null);
+const oneshot = args.includes("--oneshot");
+const defaultLen = parseInt(getArg("len", "200"));
 const vocabPath = path.resolve(getArg("vocab", path.join(__dirname, "vocab.json")));
 
 // Load weights
@@ -49,12 +53,30 @@ model.uploadWeightsBin(weightsPath);
 
 console.log(`Loaded: ${numLayers} layers, ${numHeads} heads, ${model.paramCount().toLocaleString()} params (CUDA)`);
 console.log(`Tokenizer: BPE (vocab ${vocabSize})\n`);
+
+function generate(text, len, temperature) {
+  const inputTokens = Array.from(cuda.bpeEncode(bpe, text));
+  const generated = model.generate(inputTokens, len, temperature);
+  const fullText = cuda.bpeDecode(bpe, new Int32Array(generated));
+  return fullText;
+}
+
+// Oneshot mode: print and exit
+if (oneshot) {
+  const seed = seedText || "Once upon a time";
+  const text = generate(seed, defaultLen, defaultTemp);
+  console.log(text);
+  cuda.bpeFree(bpe);
+  process.exit(0);
+}
+
+// Interactive mode
 console.log("Type a prompt and press Enter to generate text.");
 console.log("Commands: /temp 0.5, /len 200, /quit\n");
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 let temp = defaultTemp;
-let genLen = 200;
+let genLen = defaultLen;
 
 function prompt() {
   rl.question("> ", (input) => {
@@ -77,11 +99,8 @@ function prompt() {
     }
 
     const processed = input.replace(/\\n/g, "\n");
-    const inputTokens = Array.from(cuda.bpeEncode(bpe, processed));
-
-    const generated = model.generate(inputTokens, genLen, temp);
-    const fullText = cuda.bpeDecode(bpe, new Int32Array(generated));
-    const continuation = fullText.slice(processed.length);
+    const text = generate(processed, genLen, temp);
+    const continuation = text.slice(processed.length);
     console.log("\n" + processed + continuation + "\n");
     prompt();
   });

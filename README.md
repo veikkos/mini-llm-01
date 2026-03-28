@@ -52,9 +52,10 @@ node encode.js --input data/tinystories.txt
 node train.js --tokens tokens.bin --steps 5000
 # node train.js --tokens tokens.bin --steps 50000  # train longer for better quality
 
-# Generate text
+# Generate text (interactive)
 node generate.js
-node generate.js --seed "The little dog" --temp 0.8
+# Generate text (single output)
+node generate.js --seed "The little dog" --temp 0.8 --oneshot
 ```
 
 ## Training Pipeline
