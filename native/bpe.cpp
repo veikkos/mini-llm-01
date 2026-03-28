@@ -4,6 +4,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <cstdio>
+#include <chrono>
 
 BPE::BPE() {
     // Initialize base vocab: 256 byte tokens + <eos>
@@ -50,6 +51,7 @@ void BPE::train(const uint8_t* data, size_t len, int targetVocabSize) {
     }
 
     int numMerges = targetVocabSize - 257; // 256 base + <eos> + merges
+    auto t0 = std::chrono::steady_clock::now();
 
     for (int m = 0; m < numMerges; m++) {
         // Count adjacent pairs
@@ -84,11 +86,15 @@ void BPE::train(const uint8_t* data, size_t len, int targetVocabSize) {
         }
         ids = std::move(newIds);
 
-        if ((m + 1) % 100 == 0) {
-            fprintf(stderr, "  merge %d/%d: (%d, %d) -> %d (corpus size: %zu)\n",
-                    m + 1, numMerges, bestPair.first, bestPair.second, newToken, ids.size());
+        if ((m + 1) % 10 == 0 || m == 0) {
+            auto now = std::chrono::steady_clock::now();
+            double elapsed = std::chrono::duration<double>(now - t0).count();
+            double eta = (elapsed / (m + 1)) * (numMerges - m - 1);
+            fprintf(stderr, "\r  merge %d/%d | %.0fs elapsed | ~%.0fs remaining",
+                    m + 1, numMerges, elapsed, eta);
         }
     }
+    fprintf(stderr, "\n");
 
     buildVocab();
 }

@@ -28,13 +28,14 @@ Includes BPE tokenizer, AdamW optimizer, and TinyStories training pipeline.
 # Build (from Developer Command Prompt, see GPU architecture section below)
 build.cmd
 
-# Download TinyStories dataset (~250MB subset)
+# Download TinyStories dataset (~250MB subset, use --size for more)
 node download-tinystories.js
+# node download-tinystories.js --size 1000  # 1GB
 
 # Train BPE vocabulary (use --maxchars to limit corpus size)
 node train-vocab.js --input data/tinystories.txt
 
-# Pre-encode text to binary tokens (one-time, ~5 min for 250MB)
+# Pre-encode text to binary tokens (one-time)
 node encode.js --input data/tinystories.txt
 
 # Train (loads pre-encoded tokens instantly)

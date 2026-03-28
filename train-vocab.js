@@ -26,11 +26,21 @@ if (!fs.existsSync(inputPath)) {
   process.exit(1);
 }
 
+// Node.js strings are limited to ~512MB; cap corpus for vocab training
+// (100-200MB is plenty to learn good BPE merges)
+const MAX_VOCAB_BYTES = 10_000_000;
 const maxChars = parseInt(getArg("maxchars", "0"));
-let text = fs.readFileSync(inputPath, "utf-8");
-if (maxChars > 0 && text.length > maxChars) {
-  text = text.slice(0, maxChars);
-  console.log(`Truncated:  ${(maxChars / 1e6).toFixed(0)}MB of ${(text.length / 1e6).toFixed(0)}MB`);
+const fileSize = fs.statSync(inputPath).size;
+const readBytes = maxChars > 0 ? maxChars : Math.min(fileSize, MAX_VOCAB_BYTES);
+
+const buf = Buffer.alloc(readBytes);
+const fd = fs.openSync(inputPath, "r");
+fs.readSync(fd, buf, 0, readBytes, 0);
+fs.closeSync(fd);
+let text = buf.toString("utf-8");
+
+if (readBytes < fileSize) {
+  console.log(`Using:      ${(readBytes / 1e6).toFixed(0)}MB of ${(fileSize / 1e6).toFixed(0)}MB (sufficient for vocab training)`);
 }
 console.log(`Corpus:     ${(text.length / 1024).toFixed(0)}KB (${text.length} bytes)\n`);
 
