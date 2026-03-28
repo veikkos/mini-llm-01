@@ -15,6 +15,16 @@ Includes BPE tokenizer, AdamW optimizer, and TinyStories training pipeline.
 >
 > From then on, she knew she always could do lots of fun things with her favourite things!
 
+## Example output (50,000 steps, 1GB TinyStories, vocab 8192, context 256, ~9M params)
+
+> Once upon a time, there was a girl named Spy. Spy was three years old and liked to spend time with her family.
+>
+> One day, Spy found a very special present in the garden. It was very big and had a shiny jewel in her hand. She asked her mommy what it was and she replied, "I found something that can help me pick."
+>
+> Spy smiled and said, "That's a special key!" Her mommy said, "That's very clever, Spy. That's why it can give you a special gift."
+>
+> Spy learned her lesson and from then on, she and her family enjoyed the special surprise each day.
+
 ## Requirements
 
 - NVIDIA GPU (tested on RTX 4080)
