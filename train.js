@@ -47,7 +47,7 @@ if (tokensPath) {
   const p = path.resolve(tokensPath);
   process.stdout.write(`Loading pre-encoded tokens from ${path.basename(p)}...`);
   const buf = fs.readFileSync(p);
-  tokens = Array.from(new Int32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4));
+  tokens = new Int32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
   console.log(` ${tokens.length.toLocaleString()} tokens`);
 } else {
   const inputPath = path.resolve(getArg("input", path.join(__dirname, "data/tinystories.txt")));
@@ -100,9 +100,13 @@ for (let step = 0; step < numSteps; step++) {
   model.update(lr);
 
   if (step % 500 === 0 || step === numSteps - 1) {
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
-    const stepsPerSec = (step / ((Date.now() - startTime) / 1000) || 0).toFixed(1);
-    console.log(`  Step ${String(step).padStart(5)} | Loss: ${loss.toFixed(3)} | lr: ${lr.toFixed(6)} | ${elapsed}s (${stepsPerSec} step/s)`);
+    const elapsedS = (Date.now() - startTime) / 1000;
+    const stepsPerSec = step > 0 ? (step / elapsedS).toFixed(1) : "0.0";
+    const etaS = step > 0 ? Math.round((numSteps - step) / (step / elapsedS)) : 0;
+    const etaMin = Math.floor(etaS / 60);
+    const etaSec = etaS % 60;
+    const eta = etaMin > 0 ? `${etaMin}m${String(etaSec).padStart(2, "0")}s` : `${etaSec}s`;
+    console.log(`  Step ${String(step).padStart(5)} | Loss: ${loss.toFixed(3)} | lr: ${lr.toFixed(6)} | ${elapsedS.toFixed(0)}s (${stepsPerSec} step/s) | ~${eta} remaining`);
     if (!noGen) {
       const genTokens = model.generate(seed, 80, 0.8);
       const sample = cuda.bpeDecode(bpe, new Int32Array(genTokens)).slice(0, 120);

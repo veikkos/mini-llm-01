@@ -38,11 +38,9 @@ node train-vocab.js --input data/tinystories.txt
 # Pre-encode text to binary tokens (one-time)
 node encode.js --input data/tinystories.txt
 
-# Train (loads pre-encoded tokens instantly)
+# Train (loads pre-encoded tokens instantly, use --no-gen to skip sample generation)
 node train.js --tokens tokens.bin --steps 5000
-
-# Train longer for better quality
-node train.js --tokens tokens.bin --steps 50000
+# node train.js --tokens tokens.bin --steps 50000  # train longer for better quality
 
 # Generate text
 node generate.js
