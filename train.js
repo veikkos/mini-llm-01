@@ -71,8 +71,16 @@ function getLR(step) {
   return minLR + 0.5 * (maxLR - minLR) * (1 + Math.cos(Math.PI * decay));
 }
 
+// Save weights on Ctrl+C instead of losing progress
+let interrupted = false;
+process.on("SIGINT", () => {
+  if (interrupted) process.exit(1); // second Ctrl+C force-quits
+  console.log("\n\nInterrupted — saving weights...");
+  interrupted = true;
+});
+
 const offsets = new Int32Array(batchSize);
-for (let step = 0; step < numSteps; step++) {
+for (let step = 0; step < numSteps && !interrupted; step++) {
   for (let b = 0; b < batchSize; b++) {
     offsets[b] = Math.floor(Math.random() * (tokens.length - contextLen - 1));
   }
