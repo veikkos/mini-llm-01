@@ -8,6 +8,7 @@
 #include <cmath>
 #include <ctime>
 #include <cstdio>
+#include <chrono>
 
 // Forward declarations for kernels (defined in kernels.cu)
 extern "C" {
@@ -760,8 +761,9 @@ int model_generate(CudaModel* m, const int* seedTokens, int seedLen,
     // CPU buffer for logprobs of last position
     float* probs = (float*)malloc(V * sizeof(float));
 
-    // Simple xorshift64 RNG seeded from time
-    unsigned long long rng_state = (unsigned long long)time(nullptr) ^ 0xdeadbeef;
+    // Simple xorshift64 RNG seeded from high-resolution clock
+    auto now = std::chrono::high_resolution_clock::now();
+    unsigned long long rng_state = (unsigned long long)now.time_since_epoch().count() ^ 0xdeadbeef;
 
     for (int i = 0; i < numTokens; i++) {
         // Use last maxCtx tokens as context
