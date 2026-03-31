@@ -478,13 +478,21 @@ extern "C" {
 // --- GPU memory management ---
 float* cuda_alloc(int size) {
     float* ptr;
-    cudaMalloc(&ptr, size * sizeof(float));
+    cudaError_t err = cudaMalloc(&ptr, size * sizeof(float));
+    if (err != cudaSuccess) {
+        fprintf(stderr, "cuda_alloc(%d floats) failed: %s\n", size, cudaGetErrorString(err));
+        return nullptr;
+    }
     return ptr;
 }
 
 int* cuda_alloc_int(int size) {
     int* ptr;
-    cudaMalloc(&ptr, size * sizeof(int));
+    cudaError_t err = cudaMalloc(&ptr, size * sizeof(int));
+    if (err != cudaSuccess) {
+        fprintf(stderr, "cuda_alloc_int(%d ints) failed: %s\n", size, cudaGetErrorString(err));
+        return nullptr;
+    }
     return ptr;
 }
 
