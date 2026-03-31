@@ -95,45 +95,92 @@ __global__ void tanh_backward_kernel(const float* tanh_out, const float* grad_ou
     }
 }
 
+// --- Warp-level reduction helpers ---
+__device__ float warp_reduce_sum(float val) {
+    for (int offset = 16; offset > 0; offset >>= 1)
+        val += __shfl_down_sync(0xffffffff, val, offset);
+    return val;
+}
+
+__device__ float warp_reduce_max(float val) {
+    for (int offset = 16; offset > 0; offset >>= 1)
+        val = fmaxf(val, __shfl_down_sync(0xffffffff, val, offset));
+    return val;
+}
+
+__device__ float block_reduce_sum(float val) {
+    __shared__ float shared[32]; // one per warp (max 1024 threads / 32 = 32 warps)
+    int lane = threadIdx.x % 32;
+    int wid = threadIdx.x / 32;
+    val = warp_reduce_sum(val);
+    if (lane == 0) shared[wid] = val;
+    __syncthreads();
+    val = (threadIdx.x < blockDim.x / 32) ? shared[lane] : 0.0f;
+    if (wid == 0) val = warp_reduce_sum(val);
+    return val;
+}
+
+__device__ float block_reduce_max(float val) {
+    __shared__ float shared[32];
+    int lane = threadIdx.x % 32;
+    int wid = threadIdx.x / 32;
+    val = warp_reduce_max(val);
+    if (lane == 0) shared[wid] = val;
+    __syncthreads();
+    val = (threadIdx.x < blockDim.x / 32) ? shared[lane] : -1e30f;
+    if (wid == 0) val = warp_reduce_max(val);
+    return val;
+}
+
 // --- Layer Normalization ---
 // out[i] = gamma * (x[i] - mean) / sqrt(var + eps) + beta
-// Each block handles one row (one token position)
-// Also saves mean and rstd (1/sqrt(var+eps)) for backward pass
+// Each block handles one row with blockDim.x threads cooperating
 __global__ void layernorm_kernel(const float* x, const float* gamma, const float* beta,
                                   float* out, float* mean_out, float* rstd_out,
                                   int rows, int cols) {
     int row = blockIdx.x;
     if (row >= rows) return;
+    int tid = threadIdx.x;
+    int stride = blockDim.x;
 
     const float* xr = x + row * cols;
     float* or_ = out + row * cols;
     float eps = 1e-5f;
 
-    // Mean
-    float mean = 0.0f;
-    for (int j = 0; j < cols; j++) mean += xr[j];
-    mean /= cols;
+    // Parallel mean
+    float sum = 0.0f;
+    for (int j = tid; j < cols; j += stride) sum += xr[j];
+    sum = block_reduce_sum(sum);
+    __shared__ float s_mean, s_rstd;
+    if (tid == 0) s_mean = sum / cols;
+    __syncthreads();
+    float mean = s_mean;
 
-    // Variance
-    float var = 0.0f;
-    for (int j = 0; j < cols; j++) {
+    // Parallel variance
+    float var_sum = 0.0f;
+    for (int j = tid; j < cols; j += stride) {
         float d = xr[j] - mean;
-        var += d * d;
+        var_sum += d * d;
     }
-    var /= cols;
-    float rstd = 1.0f / sqrtf(var + eps);
+    var_sum = block_reduce_sum(var_sum);
+    if (tid == 0) s_rstd = 1.0f / sqrtf(var_sum / cols + eps);
+    __syncthreads();
+    float rstd = s_rstd;
 
-    // Normalize and scale
-    for (int j = 0; j < cols; j++) {
+    // Normalize and scale (parallel)
+    for (int j = tid; j < cols; j += stride) {
         or_[j] = gamma[j] * (xr[j] - mean) * rstd + beta[j];
     }
 
-    if (mean_out) mean_out[row] = mean;
-    if (rstd_out) rstd_out[row] = rstd;
+    if (tid == 0) {
+        if (mean_out) mean_out[row] = mean;
+        if (rstd_out) rstd_out[row] = rstd;
+    }
 }
 
 // --- Layer Normalization Backward ---
 // Computes dx, dgamma, dbeta from dout
+// Each block handles one row with blockDim.x threads cooperating
 __global__ void layernorm_backward_kernel(const float* dout, const float* x,
                                            const float* gamma, const float* mean,
                                            const float* rstd, float* dx,
@@ -141,6 +188,8 @@ __global__ void layernorm_backward_kernel(const float* dout, const float* x,
                                            int rows, int cols) {
     int row = blockIdx.x;
     if (row >= rows) return;
+    int tid = threadIdx.x;
+    int stride = blockDim.x;
 
     const float* dr = dout + row * cols;
     const float* xr = x + row * cols;
@@ -148,22 +197,31 @@ __global__ void layernorm_backward_kernel(const float* dout, const float* x,
     float m = mean[row];
     float rs = rstd[row];
 
-    // Accumulate dgamma and dbeta
-    for (int j = 0; j < cols; j++) {
+    // Accumulate dgamma and dbeta — one atomicAdd per thread's partial sum
+    for (int j = tid; j < cols; j += stride) {
         float xhat = (xr[j] - m) * rs;
         atomicAdd(&dgamma[j], dr[j] * xhat);
         atomicAdd(&dbeta[j], dr[j]);
     }
 
-    // Compute dx
+    // Parallel reduction for sum1, sum2
     float sum1 = 0.0f, sum2 = 0.0f;
-    for (int j = 0; j < cols; j++) {
+    for (int j = tid; j < cols; j += stride) {
         float xhat = (xr[j] - m) * rs;
         sum1 += dr[j] * gamma[j];
         sum2 += dr[j] * gamma[j] * xhat;
     }
+    sum1 = block_reduce_sum(sum1);
+    sum2 = block_reduce_sum(sum2);
 
-    for (int j = 0; j < cols; j++) {
+    // Broadcast via shared memory
+    __shared__ float s_sum1, s_sum2;
+    if (tid == 0) { s_sum1 = sum1; s_sum2 = sum2; }
+    __syncthreads();
+    sum1 = s_sum1; sum2 = s_sum2;
+
+    // Parallel dx computation
+    for (int j = tid; j < cols; j += stride) {
         float xhat = (xr[j] - m) * rs;
         dxr[j] += rs * (dr[j] * gamma[j] - (sum1 + xhat * sum2) / cols);
     }
@@ -215,54 +273,74 @@ __global__ void batched_attn_scores_kernel(const float* Q, const float* K, float
 }
 
 // --- Softmax (per row, in-place) ---
-// Each block handles one row
+// Each block handles one row with blockDim.x threads cooperating
 __global__ void softmax_kernel(float* data, int rows, int cols) {
     int row = blockIdx.x;
     if (row >= rows) return;
+    int tid = threadIdx.x;
+    int stride = blockDim.x;
 
     float* row_data = data + row * cols;
 
-    // Find max
+    // Parallel max
     float max_val = -1e30f;
-    for (int j = 0; j < cols; j++) {
-        if (row_data[j] > max_val) max_val = row_data[j];
-    }
+    for (int j = tid; j < cols; j += stride)
+        max_val = fmaxf(max_val, row_data[j]);
+    max_val = block_reduce_max(max_val);
+    __shared__ float s_max, s_sum;
+    if (tid == 0) s_max = max_val;
+    __syncthreads();
+    max_val = s_max;
 
-    // Exp and sum
+    // Parallel exp and sum
     float sum = 0.0f;
-    for (int j = 0; j < cols; j++) {
-        row_data[j] = expf(row_data[j] - max_val);
-        sum += row_data[j];
+    for (int j = tid; j < cols; j += stride) {
+        float v = expf(row_data[j] - max_val);
+        row_data[j] = v;
+        sum += v;
     }
+    sum = block_reduce_sum(sum);
+    if (tid == 0) s_sum = sum;
+    __syncthreads();
+    sum = s_sum;
 
-    // Normalize
-    for (int j = 0; j < cols; j++) {
+    // Parallel normalize
+    for (int j = tid; j < cols; j += stride)
         row_data[j] /= sum;
-    }
 }
 
 // --- Log Softmax (per row) ---
 __global__ void log_softmax_kernel(const float* in, float* out, int rows, int cols) {
     int row = blockIdx.x;
     if (row >= rows) return;
+    int tid = threadIdx.x;
+    int stride = blockDim.x;
 
     const float* in_row = in + row * cols;
     float* out_row = out + row * cols;
 
+    // Parallel max
     float max_val = -1e30f;
-    for (int j = 0; j < cols; j++) {
-        if (in_row[j] > max_val) max_val = in_row[j];
-    }
+    for (int j = tid; j < cols; j += stride)
+        max_val = fmaxf(max_val, in_row[j]);
+    max_val = block_reduce_max(max_val);
+    __shared__ float s_max, s_logsum;
+    if (tid == 0) s_max = max_val;
+    __syncthreads();
+    max_val = s_max;
 
-    float log_sum = 0.0f;
-    for (int j = 0; j < cols; j++) {
-        log_sum += expf(in_row[j] - max_val);
-    }
-    log_sum = max_val + logf(log_sum);
+    // Parallel exp sum
+    float sum = 0.0f;
+    for (int j = tid; j < cols; j += stride)
+        sum += expf(in_row[j] - max_val);
+    sum = block_reduce_sum(sum);
+    if (tid == 0) s_logsum = max_val + logf(sum);
+    __syncthreads();
+    float log_sum = s_logsum;
 
-    for (int j = 0; j < cols; j++) {
+    // Parallel subtract
+    for (int j = tid; j < cols; j += stride)
         out_row[j] = in_row[j] - log_sum;
-    }
 }
 
 // --- Log Softmax Backward ---
@@ -272,31 +350,42 @@ __global__ void log_softmax_backward_kernel(const float* log_softmax_out,
                                              int rows, int cols) {
     int row = blockIdx.x;
     if (row >= rows) return;
+    int tid = threadIdx.x;
+    int stride = blockDim.x;
 
     const float* ls = log_softmax_out + row * cols;
     const float* go = grad_out + row * cols;
     float* gi = grad_in + row * cols;
 
+    // Parallel sum of grad_out
     float sum_grad = 0.0f;
-    for (int j = 0; j < cols; j++) {
+    for (int j = tid; j < cols; j += stride)
         sum_grad += go[j];
-    }
+    sum_grad = block_reduce_sum(sum_grad);
+    __shared__ float s_sum;
+    if (tid == 0) s_sum = sum_grad;
+    __syncthreads();
+    sum_grad = s_sum;
 
-    for (int j = 0; j < cols; j++) {
+    // Parallel grad_in update
+    for (int j = tid; j < cols; j += stride)
         gi[j] += go[j] - expf(ls[j]) * sum_grad;
-    }
 }
 
 // --- NLL Loss ---
 // Picks log_prob[i][target[i]] for each row, averages
+// Parallelized: each thread handles a subset of rows
 __global__ void nll_loss_kernel(const float* log_probs, const int* targets,
                                  float* loss, int T, int vocab_size) {
-    // Single-thread kernel — tiny operation
+    int tid = threadIdx.x;
+    int stride = blockDim.x;
+
     float sum = 0.0f;
-    for (int i = 0; i < T; i++) {
+    for (int i = tid; i < T; i += stride)
         sum -= log_probs[i * vocab_size + targets[i]];
-    }
-    *loss = sum / T;
+
+    sum = block_reduce_sum(sum);
+    if (tid == 0) *loss = sum / T;
 }
 
 // --- NLL Loss Backward ---
@@ -363,17 +452,25 @@ __global__ void softmax_backward_kernel(const float* weights, const float* dWeig
                                          int is_causal) {
     int row = blockIdx.x;
     if (row >= T) return;
+    int tid = threadIdx.x;
+    int stride = blockDim.x;
 
     const float* w = weights + row * T;
     const float* dw = dWeights + row * T;
     float* ds = dScores + row * T;
 
+    // Parallel dot product
     float dot = 0.0f;
-    for (int j = 0; j < T; j++) {
+    for (int j = tid; j < T; j += stride)
         dot += dw[j] * w[j];
-    }
+    dot = block_reduce_sum(dot);
+    __shared__ float s_dot;
+    if (tid == 0) s_dot = dot;
+    __syncthreads();
+    dot = s_dot;
 
-    for (int j = 0; j < T; j++) {
+    // Parallel output
+    for (int j = tid; j < T; j += stride) {
         if (is_causal && j > row) {
             ds[j] = 0.0f;
         } else {
@@ -389,6 +486,8 @@ __global__ void batched_softmax_backward_kernel(const float* weights, const floa
                                                  int is_causal) {
     int row = blockIdx.x;
     if (row >= B * T) return;
+    int tid = threadIdx.x;
+    int stride = blockDim.x;
 
     int local_row = row % T;
 
@@ -396,12 +495,18 @@ __global__ void batched_softmax_backward_kernel(const float* weights, const floa
     const float* dw = dWeights + row * T;
     float* ds = dScores + row * T;
 
+    // Parallel dot product
     float dot = 0.0f;
-    for (int j = 0; j < T; j++) {
+    for (int j = tid; j < T; j += stride)
         dot += dw[j] * w[j];
-    }
+    dot = block_reduce_sum(dot);
+    __shared__ float s_dot;
+    if (tid == 0) s_dot = dot;
+    __syncthreads();
+    dot = s_dot;
 
-    for (int j = 0; j < T; j++) {
+    // Parallel output
+    for (int j = tid; j < T; j += stride) {
         if (is_causal && j > local_row) {
             ds[j] = 0.0f;
         } else {
@@ -591,14 +696,14 @@ void cuda_tanh_backward(const float* tanh_out, const float* grad_out,
 
 void cuda_layernorm(const float* x, const float* gamma, const float* beta,
                      float* out, float* mean, float* rstd, int rows, int cols) {
-    layernorm_kernel<<<rows, 1>>>(x, gamma, beta, out, mean, rstd, rows, cols);
+    layernorm_kernel<<<rows, 256>>>(x, gamma, beta, out, mean, rstd, rows, cols);
 }
 
 void cuda_layernorm_backward(const float* dout, const float* x,
                               const float* gamma, const float* mean,
                               const float* rstd, float* dx,
                               float* dgamma, float* dbeta, int rows, int cols) {
-    layernorm_backward_kernel<<<rows, 1>>>(dout, x, gamma, mean, rstd, dx, dgamma, dbeta, rows, cols);
+    layernorm_backward_kernel<<<rows, 256>>>(dout, x, gamma, mean, rstd, dx, dgamma, dbeta, rows, cols);
 }
 
 void cuda_attn_scores(const float* Q, const float* K, float* scores,
@@ -612,31 +717,31 @@ void cuda_batched_attn_scores(const float* Q, const float* K, float* scores,
 }
 
 void cuda_softmax(float* data, int rows, int cols) {
-    softmax_kernel<<<rows, 1>>>(data, rows, cols);
+    softmax_kernel<<<rows, 256>>>(data, rows, cols);
 }
 
 void cuda_softmax_backward(const float* weights, const float* dWeights,
                              float* dScores, int T, float scale, int is_causal) {
-    softmax_backward_kernel<<<T, 1>>>(weights, dWeights, dScores, T, scale, is_causal);
+    softmax_backward_kernel<<<T, 256>>>(weights, dWeights, dScores, T, scale, is_causal);
 }
 
 void cuda_batched_softmax_backward(const float* weights, const float* dWeights,
                                     float* dScores, int B, int T, float scale, int is_causal) {
-    batched_softmax_backward_kernel<<<B * T, 1>>>(weights, dWeights, dScores, B, T, scale, is_causal);
+    batched_softmax_backward_kernel<<<B * T, 256>>>(weights, dWeights, dScores, B, T, scale, is_causal);
 }
 
 void cuda_log_softmax(const float* in, float* out, int rows, int cols) {
-    log_softmax_kernel<<<rows, 1>>>(in, out, rows, cols);
+    log_softmax_kernel<<<rows, 256>>>(in, out, rows, cols);
 }
 
 void cuda_log_softmax_backward(const float* ls_out, const float* grad_out,
                                 float* grad_in, int rows, int cols) {
-    log_softmax_backward_kernel<<<rows, 1>>>(ls_out, grad_out, grad_in, rows, cols);
+    log_softmax_backward_kernel<<<rows, 256>>>(ls_out, grad_out, grad_in, rows, cols);
 }
 
 void cuda_nll_loss(const float* log_probs, const int* targets, float* loss,
                     int T, int vocab_size) {
-    nll_loss_kernel<<<1, 1>>>(log_probs, targets, loss, T, vocab_size);
+    nll_loss_kernel<<<1, 256>>>(log_probs, targets, loss, T, vocab_size);
 }
 
 void cuda_nll_loss_backward(float* grad, const int* targets, int T,
