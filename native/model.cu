@@ -804,7 +804,7 @@ int model_generate(CudaModel* m, const int* seedTokens, int seedLen,
         float r = (float)(rng_state & 0xFFFFFF) / (float)0xFFFFFF;
 
         float cumsum = 0.0f;
-        int next = 0;
+        int next = V - 1;
         for (int j = 0; j < V; j++) {
             cumsum += probs[j];
             if (r < cumsum) { next = j; break; }
