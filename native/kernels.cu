@@ -8,6 +8,8 @@
 
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
+#include <cstdio>
+#include <cstdlib>
 #include <math.h>
 
 // Global cuBLAS handle — initialized on first use
@@ -481,7 +483,7 @@ float* cuda_alloc(int size) {
     cudaError_t err = cudaMalloc(&ptr, size * sizeof(float));
     if (err != cudaSuccess) {
         fprintf(stderr, "cuda_alloc(%d floats) failed: %s\n", size, cudaGetErrorString(err));
-        return nullptr;
+        exit(1);
     }
     return ptr;
 }
@@ -491,7 +493,7 @@ int* cuda_alloc_int(int size) {
     cudaError_t err = cudaMalloc(&ptr, size * sizeof(int));
     if (err != cudaSuccess) {
         fprintf(stderr, "cuda_alloc_int(%d ints) failed: %s\n", size, cudaGetErrorString(err));
-        return nullptr;
+        exit(1);
     }
     return ptr;
 }

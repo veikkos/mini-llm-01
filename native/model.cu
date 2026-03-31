@@ -825,9 +825,36 @@ int model_generate(CudaModel* m, const int* seedTokens, int seedLen,
 }
 
 void model_free(CudaModel* m) {
+    // Free parameter GPU memory
+    for (int i = 0; i < m->numParams; i++) {
+        cuda_free(m->params[i].data);
+        cuda_free(m->params[i].grad);
+    }
     delete[] m->params;
+
+    // Free model buffers
+    if (m->allocB > 0 || m->allocT > 0) {
+        free_model_bufs(&m->bufs, m->numLayers);
+    }
+
+    // Free layer buffers
+    if (m->layerBufs) {
+        for (int i = 0; i < m->numLayers; i++)
+            free_layer_bufs(&m->layerBufs[i], m->numHeads);
+        delete[] m->layerBufs;
+    }
+
+    // Free AdamW optimizer state
+    if (m->adam_m) {
+        for (int i = 0; i < m->numParams; i++) {
+            cuda_free(m->adam_m[i]);
+            cuda_free(m->adam_v[i]);
+        }
+        free(m->adam_m);
+        free(m->adam_v);
+    }
+
     if (m->posCache) free(m->posCache);
-    // Buffer cleanup omitted for brevity (process exit cleans GPU)
     delete m;
 }
 
