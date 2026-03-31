@@ -156,6 +156,39 @@ static float** alloc_ptr_array(int n) {
     return (float**)malloc(n * sizeof(float*));
 }
 
+static void free_layer_bufs(LayerBuffers* lb, int numHeads) {
+    cuda_free(lb->ln1Out); cuda_free(lb->ln1Mean); cuda_free(lb->ln1Rstd);
+    cuda_free(lb->ln2Out); cuda_free(lb->ln2Mean); cuda_free(lb->ln2Rstd);
+    cuda_free(lb->dLn1Out); cuda_free(lb->dLn2Out);
+    for (int h = 0; h < numHeads; h++) {
+        cuda_free(lb->headQ[h]); cuda_free(lb->headK[h]); cuda_free(lb->headV[h]);
+        cuda_free(lb->headScores[h]); cuda_free(lb->headWeights[h]); cuda_free(lb->headOut[h]);
+        cuda_free(lb->dHeadOut[h]); cuda_free(lb->dHeadWeights[h]); cuda_free(lb->dHeadScores[h]);
+        cuda_free(lb->dHeadQ[h]); cuda_free(lb->dHeadK[h]); cuda_free(lb->dHeadV[h]);
+    }
+    free(lb->headQ); free(lb->headK); free(lb->headV);
+    free(lb->headScores); free(lb->headWeights); free(lb->headOut);
+    free(lb->dHeadOut); free(lb->dHeadWeights); free(lb->dHeadScores);
+    free(lb->dHeadQ); free(lb->dHeadK); free(lb->dHeadV);
+    cuda_free(lb->concat); cuda_free(lb->attnOut); cuda_free(lb->afterAttn);
+    cuda_free(lb->ff1); cuda_free(lb->ff1Act); cuda_free(lb->ff2); cuda_free(lb->afterFF);
+    cuda_free(lb->dConcat); cuda_free(lb->dFF1Act); cuda_free(lb->dFF1);
+    cuda_free(lb->tmp);
+}
+
+static void free_model_bufs(ModelBuffers* bufs, int numLayers) {
+    cuda_free(bufs->tokEmb); cuda_free(bufs->posEmb); cuda_free(bufs->x);
+    if (bufs->layerInputs) {
+        for (int i = 0; i < numLayers; i++) cuda_free(bufs->layerInputs[i]);
+        free(bufs->layerInputs);
+        bufs->layerInputs = nullptr;
+    }
+    cuda_free(bufs->logits); cuda_free(bufs->logProbs); cuda_free(bufs->loss);
+    cuda_free(bufs->dLogProbs); cuda_free(bufs->dLogits); cuda_free(bufs->dX);
+    cuda_free(bufs->tmp);
+    cuda_free(bufs->tokens); cuda_free(bufs->targets); cuda_free(bufs->positions);
+}
+
 static void alloc_layer_bufs(LayerBuffers* lb, int numHeads, int BT, int T, int d, int E, int ffDim) {
     lb->ln1Out = cuda_alloc(BT * E);
     lb->ln1Mean = cuda_alloc(BT);
@@ -463,6 +496,17 @@ void model_alloc_buffers(CudaModel* m, int B, int T) {
         int maxBT = BT > oldBT ? BT : oldBT;
         int E = m->embedDim;
         int V = m->vocabSize;
+
+        // Free old buffers before reallocating
+        if (oldBT > 0) {
+            free_model_bufs(&m->bufs, m->numLayers);
+            if (m->layerBufs) {
+                for (int i = 0; i < m->numLayers; i++)
+                    free_layer_bufs(&m->layerBufs[i], m->numHeads);
+                delete[] m->layerBufs;
+                m->layerBufs = nullptr;
+            }
+        }
 
         m->bufs.tokEmb = cuda_alloc(maxBT * E);
         m->bufs.posEmb = cuda_alloc(maxBT * E);
