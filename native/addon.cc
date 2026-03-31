@@ -25,8 +25,8 @@ extern "C" {
     void cuda_transpose(const float* A, float* B, int rows, int cols);
     void cuda_add(const float* A, const float* B, float* C, int size, int cols, int b_size);
     void cuda_add_bias_backward(const float* grad, float* bias_grad, int rows, int cols);
-    void cuda_tanh(const float* in, float* out, int size);
-    void cuda_tanh_backward(const float* tanh_out, const float* grad_out, float* grad_in, int size);
+    void cuda_gelu(const float* in, float* out, int size);
+    void cuda_gelu_backward(const float* input, const float* grad_out, float* grad_in, int size);
     void cuda_attn_scores(const float* Q, const float* K, float* scores, int T, int D, float scale, int is_causal);
     void cuda_softmax(float* data, int rows, int cols);
     void cuda_softmax_backward(const float* weights, const float* dWeights, float* dScores, int T, float scale, int is_causal);
@@ -227,19 +227,19 @@ static napi_value AddBiasBackward(napi_env env, napi_callback_info info) {
     return make_undef(env);
 }
 
-// tanh(in, out, size)
-static napi_value Tanh(napi_env env, napi_callback_info info) {
+// gelu(in, out, size)
+static napi_value Gelu(napi_env env, napi_callback_info info) {
     size_t argc = 3; napi_value args[3];
     napi_get_cb_info(env, info, &argc, args, NULL, NULL);
-    cuda_tanh(get_ptr(env, args[0]), get_ptr(env, args[1]), get_int(env, args[2]));
+    cuda_gelu(get_ptr(env, args[0]), get_ptr(env, args[1]), get_int(env, args[2]));
     return make_undef(env);
 }
 
-// tanhBackward(tanh_out, grad_out, grad_in, size)
-static napi_value TanhBackward(napi_env env, napi_callback_info info) {
+// geluBackward(input, grad_out, grad_in, size)
+static napi_value GeluBackward(napi_env env, napi_callback_info info) {
     size_t argc = 4; napi_value args[4];
     napi_get_cb_info(env, info, &argc, args, NULL, NULL);
-    cuda_tanh_backward(get_ptr(env, args[0]), get_ptr(env, args[1]),
+    cuda_gelu_backward(get_ptr(env, args[0]), get_ptr(env, args[1]),
                        get_ptr(env, args[2]), get_int(env, args[3]));
     return make_undef(env);
 }
@@ -770,8 +770,8 @@ static napi_value Init(napi_env env, napi_value exports) {
     EXPORT_FN(transpose, Transpose)
     EXPORT_FN(add, Add)
     EXPORT_FN(addBiasBackward, AddBiasBackward)
-    EXPORT_FN(tanh, Tanh)
-    EXPORT_FN(tanhBackward, TanhBackward)
+    EXPORT_FN(gelu, Gelu)
+    EXPORT_FN(geluBackward, GeluBackward)
     EXPORT_FN(attnScores, AttnScores)
     EXPORT_FN(softmax, Softmax)
     EXPORT_FN(softmaxBackward, SoftmaxBackward)

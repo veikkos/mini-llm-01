@@ -77,21 +77,30 @@ __global__ void add_bias_backward_kernel(const float* grad, float* bias_grad,
     }
 }
 
-// --- Tanh ---
-__global__ void tanh_kernel(const float* in, float* out, int size) {
+// --- GELU (approximate): 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3))) ---
+__global__ void gelu_kernel(const float* in, float* out, int size) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < size) {
-        out[i] = tanhf(in[i]);
+        float x = in[i];
+        float c = 0.7978845608f; // sqrt(2/pi)
+        float inner = c * (x + 0.044715f * x * x * x);
+        out[i] = 0.5f * x * (1.0f + tanhf(inner));
     }
 }
 
-// --- Tanh Backward: grad_in += (1 - tanh_out^2) * grad_out ---
-__global__ void tanh_backward_kernel(const float* tanh_out, const float* grad_out,
+// --- GELU Backward ---
+__global__ void gelu_backward_kernel(const float* input, const float* grad_out,
                                       float* grad_in, int size) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < size) {
-        float t = tanh_out[i];
-        grad_in[i] += (1.0f - t * t) * grad_out[i];
+        float x = input[i];
+        float c = 0.7978845608f;
+        float x3 = x * x * x;
+        float inner = c * (x + 0.044715f * x3);
+        float tanh_inner = tanhf(inner);
+        float sech2 = 1.0f - tanh_inner * tanh_inner;
+        float d_inner = c * (1.0f + 3.0f * 0.044715f * x * x);
+        grad_in[i] += grad_out[i] * 0.5f * ((1.0f + tanh_inner) + x * sech2 * d_inner);
     }
 }
 
@@ -685,13 +694,13 @@ void cuda_add_bias_backward(const float* grad, float* bias_grad, int rows, int c
     add_bias_backward_kernel<<<grid1d(cols), 256>>>(grad, bias_grad, rows, cols);
 }
 
-void cuda_tanh(const float* in, float* out, int size) {
-    tanh_kernel<<<grid1d(size), 256>>>(in, out, size);
+void cuda_gelu(const float* in, float* out, int size) {
+    gelu_kernel<<<grid1d(size), 256>>>(in, out, size);
 }
 
-void cuda_tanh_backward(const float* tanh_out, const float* grad_out,
+void cuda_gelu_backward(const float* input, const float* grad_out,
                          float* grad_in, int size) {
-    tanh_backward_kernel<<<grid1d(size), 256>>>(tanh_out, grad_out, grad_in, size);
+    gelu_backward_kernel<<<grid1d(size), 256>>>(input, grad_out, grad_in, size);
 }
 
 void cuda_layernorm(const float* x, const float* gamma, const float* beta,

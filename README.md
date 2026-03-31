@@ -84,7 +84,7 @@ Custom kernels in `native/kernels.cu`:
 - `attn_scores_kernel` / `batched_attn_scores_kernel` — Q @ K^T with causal mask
 - `softmax_kernel` / `softmax_backward_kernel` / `batched_softmax_backward_kernel` — per-row softmax
 - `log_softmax_kernel` / `log_softmax_backward_kernel` — output layer
-- `tanh_kernel` / `tanh_backward_kernel` — activation
+- `gelu_kernel` / `gelu_backward_kernel` — GELU activation
 - `gather_kernel` / `gather_backward_kernel` — embedding lookup
 - `concat_heads_kernel` / `split_heads_kernel` — multi-head attention concat/split
 - `nll_loss_kernel` / `nll_loss_backward_kernel` — loss computation

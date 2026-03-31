@@ -28,8 +28,8 @@ extern "C" {
     void cuda_batched_transpose(const float* A, float* B, int batchCount, int rows, int cols);
     void cuda_add(const float* A, const float* B, float* C, int size, int cols, int b_size);
     void cuda_add_bias_backward(const float* grad, float* bias_grad, int rows, int cols);
-    void cuda_tanh(const float* in, float* out, int size);
-    void cuda_tanh_backward(const float* tanh_out, const float* grad_out, float* grad_in, int size);
+    void cuda_gelu(const float* in, float* out, int size);
+    void cuda_gelu_backward(const float* input, const float* grad_out, float* grad_in, int size);
     void cuda_batched_attn_scores(const float* Q, const float* K, float* scores,
                                    int B, int T, int D, float scale, int is_causal);
     void cuda_softmax(float* data, int rows, int cols);
@@ -330,7 +330,7 @@ static void layer_forward(CudaModel* m, int layer, float* x, int B, int T) {
     // Feed-forward on normalized input
     cuda_matmul(b->ln2Out, layer_ff1W(m, layer).data, b->ff1, BT, E, m->ffDim);
     cuda_add(b->ff1, layer_ff1B(m, layer).data, b->ff1, BT * m->ffDim, m->ffDim, m->ffDim);
-    cuda_tanh(b->ff1, b->ff1Act, BT * m->ffDim);
+    cuda_gelu(b->ff1, b->ff1Act, BT * m->ffDim);
 
     cuda_matmul(b->ff1Act, layer_ff2W(m, layer).data, b->ff2, BT, m->ffDim, E);
     cuda_add(b->ff2, layer_ff2B(m, layer).data, b->ff2, BT * E, E, E);
@@ -363,7 +363,7 @@ static void layer_backward(CudaModel* m, int layer, float* x, float* dOut, int B
     cuda_add_bias_backward(dOut, layer_ff2B(m, layer).grad, BT, E);
 
     cuda_zero(b->dFF1, BT * ffDim);
-    cuda_tanh_backward(b->ff1Act, b->dFF1Act, b->dFF1, BT * ffDim);
+    cuda_gelu_backward(b->ff1, b->dFF1Act, b->dFF1, BT * ffDim);
 
     // dLn2Out from FF path
     cuda_zero(b->dLn2Out, BT * E);
